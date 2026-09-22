@@ -236,6 +236,18 @@ class LedgerTests(_StoreBase):
 
 
 class BuildMessagesTests(unittest.TestCase):
+    def test_publish_success_routes_each_device_to_its_registered_workspace(self):
+        item = {'source': 'build-publish', 'title': 'PR published', 'waiting': False,
+                'kind': 'activity', 'id': 'published-1', 'links': [{'ref': 'task:t1'}]}
+        self.assertTrue(pn.should_push(item))
+        registered = {'tokens': {'phone-a': {'workspace_host': 'https://workspace.example'}}}
+        with mock.patch.object(pn.PushTokenStore, '_read_unlocked', return_value=registered):
+            messages = pn._build_messages(item, ['phone-a', 'legacy-phone'])
+        self.assertEqual(messages[0]['data']['workspaceHost'], 'https://workspace.example')
+        self.assertEqual(messages[0]['data']['ref'], 'task:t1')
+        self.assertEqual(messages[0]['data']['source'], 'build-publish')
+        self.assertEqual(messages[1]['data']['workspaceHost'], '')
+
     def test_build_messages_carries_deeplink_and_body(self):
         item = {'title': 'Task waiting: deploy', 'body_md': 'needs input\nsecond line',
                 'links': [{'label': 'Open', 'ref': 'task:99'}], 'id': 'fd_1',
