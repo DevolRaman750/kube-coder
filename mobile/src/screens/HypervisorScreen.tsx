@@ -59,6 +59,7 @@ import {
   buildTurns,
   groupActivity,
   sameTranscript,
+  shouldRevealEarlier,
   turnCopyText,
   turnWindow,
   TURN_WINDOW,
@@ -187,6 +188,9 @@ export default function HypervisorScreen() {
   // while pinned — so scrolling up to read history isn't yanked back down by the
   // 2s poll. Starts true; onScroll flips it as the user scrolls.
   const pinnedRef = useRef(true);
+  // True while a page of older turns has been asked for but not rendered yet,
+  // so the scroll events of one gesture load one page, not several (#814).
+  const revealingRef = useRef(false);
   // Per-message copy feedback (issue #351, parity with the web chat): key of
   // the message whose button currently reads "Copied", reverted after a beat.
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -399,13 +403,25 @@ export default function HypervisorScreen() {
   // tail so switching threads never inherits a huge revealed range (#525).
   useEffect(() => {
     pinnedRef.current = true;
+    revealingRef.current = false; // a reveal in flight belongs to the old thread
     setVisibleTurns(TURN_WINDOW);
   }, [activeId]);
 
+  // The requested page has rendered: the next gesture may ask for another.
+  useEffect(() => {
+    revealingRef.current = false;
+  }, [visibleTurns]);
+
+  /** Grow the window by one page of older turns. The "Show earlier" pill and
+   *  the near-top auto-load share this path. The ScrollView's
+   *  maintainVisibleContentPosition keeps the reader on the message they were
+   *  reading while the page lands above it (#814). */
   function revealEarlier() {
     // Revealing older turns must not yank to the bottom — unpin so the
     // scroll-pin effect leaves the reader where they are.
     pinnedRef.current = false;
+    if (revealingRef.current) return;
+    revealingRef.current = true;
     setVisibleTurns((v) => v + TURN_WINDOW_STEP);
   }
 
@@ -413,6 +429,9 @@ export default function HypervisorScreen() {
   // pulling down); scrolling back to the bottom re-pins.
   function onTranscriptScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    // Reading back through history: pull the next page of older turns in
+    // before the reader hits the wall at the top of the window (#814).
+    if (shouldRevealEarlier(hiddenTurns, contentOffset.y)) revealEarlier();
     pinnedRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 80;
   }
 
@@ -797,6 +816,11 @@ export default function HypervisorScreen() {
           contentContainerStyle={styles.transcript}
           onScroll={onTranscriptScroll}
           scrollEventThrottle={100}
+          // Older turns are inserted above the reader (#814). Natively keep
+          // the first visible turn where it is instead of letting the page
+          // shove it down. Index 0 is the "Show earlier" slot, which never
+          // moves, so the anchor is always a turn — see that slot.
+          maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
         >
           {empty ? (
             <View style={styles.welcome}>
@@ -825,21 +849,31 @@ export default function HypervisorScreen() {
             </View>
           ) : (
             <>
-            {hiddenTurns > 0 && (
-              <Pressable
-                onPress={revealEarlier}
-                accessibilityRole="button"
-                accessibilityLabel={`Show ${hiddenTurns} earlier messages`}
-                style={({ pressed }) => [styles.earlierBtn, pressed && { opacity: 0.6 }]}
-              >
-                <Ionicons name="chevron-up" size={14} color={colors.textMuted} />
-                <Text style={styles.earlierText}>
-                  Show {Math.min(hiddenTurns, TURN_WINDOW_STEP)} earlier
-                  {Math.min(hiddenTurns, TURN_WINDOW_STEP) === 1 ? ' message' : ' messages'}
-                </Text>
-                <Text style={styles.earlierCount}>{hiddenTurns} hidden</Text>
-              </Pressable>
-            )}
+            {/* Always child 0, even when nothing is hidden, so the turns start
+                at index 1 for maintainVisibleContentPosition (#814). If the
+                pill itself were child 0 it could be picked as the anchor, and
+                older turns would land below it, pushing the reader down.
+                collapsable={false} stops the renderer flattening it away. */}
+            <View
+              collapsable={false}
+              style={hiddenTurns > 0 ? undefined : styles.earlierSlotEmpty}
+            >
+              {hiddenTurns > 0 && (
+                <Pressable
+                  onPress={revealEarlier}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show ${hiddenTurns} earlier messages`}
+                  style={({ pressed }) => [styles.earlierBtn, pressed && { opacity: 0.6 }]}
+                >
+                  <Ionicons name="chevron-up" size={14} color={colors.textMuted} />
+                  <Text style={styles.earlierText}>
+                    Show {Math.min(hiddenTurns, TURN_WINDOW_STEP)} earlier
+                    {Math.min(hiddenTurns, TURN_WINDOW_STEP) === 1 ? ' message' : ' messages'}
+                  </Text>
+                  <Text style={styles.earlierCount}>{hiddenTurns} hidden</Text>
+                </Pressable>
+              )}
+            </View>
             {turns.slice(turnStart).map((turn, wi) => {
               const i = turnStart + wi;
               return turn.role === 'user' ? (
@@ -1956,6 +1990,10 @@ const styles = StyleSheet.create({
   },
   restoreBtnText: { color: colors.textMuted, fontSize: font.size.xs, fontWeight: '600' },
   transcript: { padding: space.lg, gap: space.md },
+  // The empty "Show earlier" slot has no height, but the transcript's `gap`
+  // would still add space above the first turn — cancel it so a short chat
+  // looks exactly as it did before the slot existed (#814).
+  earlierSlotEmpty: { marginBottom: -space.md },
   // "Show earlier messages" — head of a windowed transcript (#525).
   earlierBtn: {
     flexDirection: 'row',

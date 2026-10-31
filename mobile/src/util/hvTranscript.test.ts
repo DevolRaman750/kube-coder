@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   buildTurns,
   groupActivity,
+  shouldRevealEarlier,
   turnWindow,
+  REVEAL_NEAR_TOP_PX,
   TURN_WINDOW,
   TURN_WINDOW_STEP,
   type HvBlock,
@@ -45,6 +47,16 @@ describe('turnWindow (mobile)', () => {
   it('never overshoots the total and clamps a tiny visible up to the floor', () => {
     expect(turnWindow(10, 999)).toEqual({ start: 0, hidden: 0 });
     expect(turnWindow(TURN_WINDOW + 4, 1)).toEqual({ start: 4, hidden: 4 });
+  });
+
+  it('loads older turns only inside the runway near the top (#814)', () => {
+    expect(shouldRevealEarlier(5, 0)).toBe(true);
+    expect(shouldRevealEarlier(5, REVEAL_NEAR_TOP_PX - 1)).toBe(true);
+    expect(shouldRevealEarlier(5, REVEAL_NEAR_TOP_PX)).toBe(false);
+  });
+
+  it('never loads when nothing is hidden (#814)', () => {
+    expect(shouldRevealEarlier(0, 0)).toBe(false);
   });
 });
 

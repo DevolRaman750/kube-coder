@@ -141,6 +141,11 @@ export function sameTranscript(
 export const TURN_WINDOW = 30;
 export const TURN_WINDOW_STEP = 30;
 
+/** How close (px) to the top of the transcript the reader gets before the next
+ *  page of older turns is pulled in — about a screen of runway, so scrolling
+ *  back through history never reaches a wall (#814). Mirrors the web value. */
+export const REVEAL_NEAR_TOP_PX = 600;
+
 export interface TurnWindow {
   /** Index of the first rendered turn — turns before it are hidden. */
   start: number;
@@ -156,6 +161,13 @@ export function turnWindow(total: number, visible: number): TurnWindow {
   const shown = Math.min(Math.max(0, total), Math.max(TURN_WINDOW, visible));
   const start = Math.max(0, total - shown);
   return { start, hidden: start };
+}
+
+/** Whether the reader is close enough to the top that the next page of older
+ *  turns should load on its own (#814). Same rule as the web
+ *  shouldRevealEarlier(); `offsetY` is the ScrollView's contentOffset.y. */
+export function shouldRevealEarlier(hidden: number, offsetY: number): boolean {
+  return hidden > 0 && offsetY < REVEAL_NEAR_TOP_PX;
 }
 
 /** MCP render tools whose tool_call renders inline instead of a text chip. */
